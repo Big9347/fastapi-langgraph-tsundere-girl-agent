@@ -10,7 +10,9 @@ from urllib.parse import quote_plus
 from asgiref.sync import sync_to_async
 from langchain_core.messages import (
     BaseMessage,
-    ToolMessage,
+    SystemMessage,
+    HumanMessage,
+#    ToolMessage,
     convert_to_openai_messages,
 )
 from langfuse.langchain import CallbackHandler
@@ -37,7 +39,7 @@ from app.core.config import (
 #from app.core.langgraph.tools import tools
 from app.core.logging import logger
 from app.core.metrics import llm_inference_duration_seconds
-from app.core.prompts import load_system_prompt
+from app.core.prompts import load_system_prompt, load_analyzer_prompt
 from app.schemas import (
     GraphState,
     Message,
@@ -45,7 +47,7 @@ from app.schemas import (
 from app.services.llm import llm_service
 from app.utils import (
     dump_messages,
-    prepare_messages,
+    prepare_messages_sliding_window,
     process_llm_response,
 )
 
@@ -173,15 +175,77 @@ class LangGraphAgent:
                 user_id=user_id,
                 error=str(e),
             )
+    async def _guardrail(self, state: GraphState, config: RunnableConfig) -> dict:
+        """
+        """
+        return {}
+    async def _analyze(self, state: GraphState, config: RunnableConfig) -> dict:
+        """Analyze the user's latest message for sentiment and name extraction.
 
-    async def _chat(self, state: GraphState, config: RunnableConfig) -> Command:
-        """Process the chat state and generate a response.
-
-        Args:
-            state (GraphState): The current state of the conversation.
+        Uses the LLM to evaluate whether the message is polite (+1),
+        rude (-1), or neutral (0), and extracts the user's name if mentioned.
 
         Returns:
-            Command: Command object with updated state and next node to execute.
+            dict with score_modifier and optionally user_name.
+        """
+        # Get the last user message
+        last_user_msg = None
+        for msg in reversed(state.messages):
+            if isinstance(msg, HumanMessage) and msg.content:
+                last_user_msg = msg.content
+                break
+
+        if not last_user_msg:
+            return {"score_modifier": 0}
+
+        analyzer_prompt = load_analyzer_prompt()
+
+        try:
+            from pydantic import BaseModel, Field
+            class AnalyzerResult(BaseModel):
+                modifier: int = Field(description="Score modifier between -1 and 1")
+                user_name: str | None = Field(default=None, description="The extracted user name")
+
+            current_llm = self.llm_service.get_llm()
+            structured_llm = current_llm.with_structured_output(AnalyzerResult)
+
+            result: AnalyzerResult = await structured_llm.ainvoke(
+                [
+                    SystemMessage(content=analyzer_prompt),
+                    HumanMessage(content=last_user_msg),
+                ]
+            )
+
+            modifier = max(-1, min(1, result.modifier))  # Clamp to -1, 0, +1
+
+            new_score = state.affection_score + modifier
+            new_score = max(-10, min(10, new_score))
+
+            update = {"affection_score": new_score}
+
+            extracted_name = result.user_name
+            if extracted_name and isinstance(extracted_name, str):
+                update["user_name"] = extracted_name
+
+            logger.info(
+                "analyzer_completed",
+                modifier=modifier,
+                old_score=state.affection_score,
+                new_score=new_score,
+                extracted_name=extracted_name,
+                session_id=config["configurable"]["thread_id"],
+            )
+
+            return update
+
+        except Exception as e:
+            logger.error("analyzer_failed", error=str(e))
+            return {"affection_score": state.affection_score}
+        
+    async def _generate(self, state: GraphState, config: RunnableConfig) -> dict:
+        """Generate the Tsundere-persona response using the current affection score.
+
+        The system prompt dynamically adapts tone based on the score.
         """
         # Get the current LLM instance for metrics
         current_llm = self.llm_service.get_llm()
@@ -191,15 +255,25 @@ class LangGraphAgent:
             else settings.DEFAULT_LLM_MODEL
         )
 
-        SYSTEM_PROMPT = load_system_prompt(long_term_memory=state.long_term_memory)
+        SYSTEM_PROMPT = load_system_prompt(
+            long_term_memory=state.long_term_memory, 
+            affection_score=state.affection_score,
+            user_name=state.user_name
+        )
 
         # Prepare messages with system prompt
-        messages = prepare_messages(state.messages, current_llm, SYSTEM_PROMPT)
+        messages = prepare_messages_sliding_window(
+            messages=state.messages,
+            system_prompt=SYSTEM_PROMPT,
+            llm=current_llm,
+            session_id=config["configurable"]["thread_id"],
+            model_name=model_name,
+        )
 
         try:
             # Use LLM service with automatic retries and circular fallback
             with llm_inference_duration_seconds.labels(model=model_name).time():
-                response_message = await self.llm_service.call(dump_messages(messages))
+                response_message = await self.llm_service.call(messages)
 
             # Process response to handle structured content blocks
             response_message = process_llm_response(response_message)
@@ -209,46 +283,48 @@ class LangGraphAgent:
                 session_id=config["configurable"]["thread_id"],
                 model=model_name,
                 environment=settings.ENVIRONMENT.value,
+                affection_score=state.affection_score,
             )
 
             # Determine next node based on whether there are tool calls
-            if response_message.tool_calls:
-                goto = "tool_call"
-            else:
-                goto = END
+            # if response_message.tool_calls:
+            #     goto = "tool_call"
+            # else:
+            #     goto = END
 
-            return Command(update={"messages": [response_message]}, goto=goto)
+            return {"messages": [response_message]}
         except Exception as e:
             logger.error(
-                "llm_call_failed_all_models",
+                "generator_failed",
                 session_id=config["configurable"]["thread_id"],
                 error=str(e),
                 environment=settings.ENVIRONMENT.value,
             )
-            raise Exception(f"failed to get llm response after trying all models: {str(e)}")
+            raise Exception(f"Failed to generate Tsundere response: {str(e)}")
 
     # Define our tool node
-    async def _tool_call(self, state: GraphState) -> Command:
-        """Process tool calls from the last message.
+    # async def _tool_call(self, state: GraphState) -> Command:
+    #     """Process tool calls from the last message.
 
-        Args:
-            state: The current agent state containing messages and tool calls.
+    #     Args:
+    #         state: The current agent state containing messages and tool calls.
 
-        Returns:
-            Command: Command object with updated messages and routing back to chat.
-        """
-        outputs = []
-        for tool_call in state.messages[-1].tool_calls:
-            tool_result = await self.tools_by_name[tool_call["name"]].ainvoke(tool_call["args"])
-            outputs.append(
-                ToolMessage(
-                    content=tool_result,
-                    name=tool_call["name"],
-                    tool_call_id=tool_call["id"],
-                )
-            )
-        return Command(update={"messages": outputs}, goto="chat")
+    #     Returns:
+    #         Command: Command object with updated messages and routing back to chat.
+    #     """
+    #     outputs = []
+    #     for tool_call in state.messages[-1].tool_calls:
+    #         tool_result = await self.tools_by_name[tool_call["name"]].ainvoke(tool_call["args"])
+    #         outputs.append(
+    #             ToolMessage(
+    #                 content=tool_result,
+    #                 name=tool_call["name"],
+    #                 tool_call_id=tool_call["id"],
+    #             )
+    #         )
+    #     return Command(update={"messages": outputs}, goto="chat")
 
+    
     async def create_graph(self) -> Optional[CompiledStateGraph]:
         """Create and configure the LangGraph workflow.
 
@@ -258,10 +334,19 @@ class LangGraphAgent:
         if self._graph is None:
             try:
                 graph_builder = StateGraph(GraphState)
-                graph_builder.add_node("chat", self._chat, ends=["tool_call", END])
-                graph_builder.add_node("tool_call", self._tool_call, ends=["chat"])
-                graph_builder.set_entry_point("chat")
-                graph_builder.set_finish_point("chat")
+                # graph_builder.add_node("guardrail", self._guardrail)
+                graph_builder.add_node("analyzer", self._analyze)
+                graph_builder.add_node("generator", self._generate)
+#                graph_builder.add_node("tool_call", self._tool_call, ends=["chat"])
+
+                graph_builder.set_entry_point("analyzer")
+                # graph_builder.add_conditional_edges(
+                #     "guardrail",
+                #     lambda x: x["guardrail_decision"],
+                #     ["analyzer", END],
+                # )
+                graph_builder.add_edge("analyzer", "generator")
+                graph_builder.add_edge("generator", END)
 
                 # Get connection pool (may be None in production if DB unavailable)
                 connection_pool = await self._get_connection_pool()
@@ -299,7 +384,7 @@ class LangGraphAgent:
         messages: list[Message],
         session_id: str,
         user_id: Optional[str] = None,
-    ) -> list[dict]:
+    ) -> tuple[list[dict], int]:
         """Get a response from the LLM.
 
         Args:
@@ -308,7 +393,7 @@ class LangGraphAgent:
             user_id (Optional[str]): The user ID for Langfuse tracking.
 
         Returns:
-            list[dict]: The response from the LLM.
+            tuple[list[dict], int]: The response from the LLM and the affection score.
         """
         if self._graph is None:
             self._graph = await self.create_graph()
@@ -336,7 +421,7 @@ class LangGraphAgent:
                     user_id, convert_to_openai_messages(response["messages"]), config["metadata"]
                 )
             )
-            return self.__process_messages(response["messages"])
+            return self.__process_messages(response["messages"]), response["affection_score"]
         except Exception as e:
             logger.error(f"Error getting response: {str(e)}")
 
@@ -356,9 +441,7 @@ class LangGraphAgent:
         config = {
             "configurable": {"thread_id": session_id},
             "callbacks": [
-                CallbackHandler(
-                    environment=settings.ENVIRONMENT.value, debug=False, user_id=user_id, session_id=session_id
-                )
+                CallbackHandler()
             ],
             "metadata": {
                 "user_id": user_id,
@@ -375,13 +458,27 @@ class LangGraphAgent:
         ) or "No relevant memory found."
 
         try:
-            async for token, _ in self._graph.astream(
+            async for token, metadata in self._graph.astream(
                 {"messages": dump_messages(messages), "long_term_memory": relevant_memory},
                 config,
                 stream_mode="messages",
             ):
+                if metadata.get("langgraph_node") != "generator":
+                    continue
                 try:
-                    yield token.content
+                    content = token.content
+                    if isinstance(content, list):
+                        text_content = ""
+                        for item in content:
+                            if isinstance(item, dict) and "text" in item:
+                                text_content += item["text"]
+                            elif isinstance(item, str):
+                                text_content += item
+                        content = text_content
+                    
+                    if content or token.content == "":
+                        # yield even if it's an empty string to maintain stream structure
+                        yield str(content)
                 except Exception as token_error:
                     logger.error("Error processing token", error=str(token_error), session_id=session_id)
                     # Continue with next token even if current one fails
@@ -415,15 +512,51 @@ class LangGraphAgent:
             config={"configurable": {"thread_id": session_id}}
         )
         return self.__process_messages(state.values["messages"]) if state.values else []
+    
+    async def get_affection_score(self, session_id: str) -> int:
+        """Get the current affection score for a session.
 
+        Args:
+            session_id: The session ID.
+
+        Returns:
+            int: The current affection score.
+        """
+        if self._graph is None:
+            self._graph = await self.create_graph()
+
+        state: StateSnapshot = await sync_to_async(self._graph.get_state)(
+            config={"configurable": {"thread_id": session_id}}
+        )
+        if state.values:
+            return state.values.get("affection_score", 0)
+        return 0
+    
     def __process_messages(self, messages: list[BaseMessage]) -> list[Message]:
         openai_style_messages = convert_to_openai_messages(messages)
         # keep just assistant and user messages
-        return [
-            Message(role=message["role"], content=str(message["content"]))
-            for message in openai_style_messages
-            if message["role"] in ["assistant", "user"] and message["content"]
-        ]
+        processed = []
+        for message in openai_style_messages:
+            if message["role"] not in ["assistant", "user"]:
+                continue
+                
+            content = message.get("content", "")
+            if not content:
+                continue
+                
+            if isinstance(content, list):
+                text_content = ""
+                for item in content:
+                    if isinstance(item, dict) and "text" in item:
+                        text_content += item["text"]
+                    elif isinstance(item, str):
+                        text_content += item
+                content_str = text_content
+            else:
+                content_str = str(content)
+                
+            processed.append(Message(role=message["role"], content=content_str))
+        return processed
 
     async def clear_chat_history(self, session_id: str) -> None:
         """Clear all chat history for a given thread ID.

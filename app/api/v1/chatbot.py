@@ -48,7 +48,7 @@ async def chat(
         session: The current session from the auth token.
 
     Returns:
-        ChatResponse: The processed chat response.
+        ChatResponse: The processed chat response with affection_score.
 
     Raises:
         HTTPException: If there's an error processing the request.
@@ -60,11 +60,11 @@ async def chat(
             message_count=len(chat_request.messages),
         )
 
-        result = await agent.get_response(chat_request.messages, session.id, user_id=session.user_id)
+        result, affection_score = await agent.get_response(chat_request.messages, session.id, user_id=session.user_id)
 
-        logger.info("chat_request_processed", session_id=session.id)
+        logger.info("chat_request_processed", session_id=session.id, affection_score=affection_score)
 
-        return ChatResponse(messages=result)
+        return ChatResponse(messages=result, affection_score=affection_score)
     except Exception as e:
         logger.error("chat_request_failed", session_id=session.id, error=str(e), exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
@@ -115,9 +115,11 @@ async def chat_stream(
                         full_response += chunk
                         response = StreamResponse(content=chunk, done=False)
                         yield f"data: {json.dumps(response.model_dump())}\n\n"
+                # Get affection score after streaming completes
+                affection_score = await agent.get_affection_score(session.id)
 
-                # Send final message indicating completion
-                final_response = StreamResponse(content="", done=True)
+                # Send final message with affection_score
+                final_response = StreamResponse(content="", done=True, affection_score=affection_score)
                 yield f"data: {json.dumps(final_response.model_dump())}\n\n"
 
             except Exception as e:
@@ -155,14 +157,15 @@ async def get_session_messages(
         session: The current session from the auth token.
 
     Returns:
-        ChatResponse: All messages in the session.
+        ChatResponse: All messages in the session with current affection_score.
 
     Raises:
         HTTPException: If there's an error retrieving the messages.
     """
     try:
         messages = await agent.get_chat_history(session.id)
-        return ChatResponse(messages=messages)
+        affection_score = await agent.get_affection_score(session.id)
+        return ChatResponse(messages=messages, affection_score=affection_score)
     except Exception as e:
         logger.error("get_messages_failed", session_id=session.id, error=str(e), exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))

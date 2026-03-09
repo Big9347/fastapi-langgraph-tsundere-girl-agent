@@ -1,7 +1,16 @@
 """This file contains the main application entry point."""
 
 import os
+import sys
 from contextlib import asynccontextmanager
+
+# Install winloop on Windows if available
+if sys.platform == "win32":
+    try:
+        import winloop
+        winloop.install()
+    except ImportError:
+        pass
 from datetime import datetime
 from typing import (
     Any,
@@ -17,6 +26,7 @@ from fastapi import (
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from langfuse import Langfuse
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -122,6 +132,8 @@ app.add_middleware(
 # Include API router
 app.include_router(api_router, prefix=settings.API_V1_STR)
 
+# Serve the frontend testing UI at /app
+app.mount("/app", StaticFiles(directory="frontend", html=True), name="frontend")
 
 @app.get("/")
 @limiter.limit(settings.RATE_LIMIT_ENDPOINTS["root"][0])

@@ -4,6 +4,7 @@ import re
 from typing import (
     List,
     Literal,
+    Optional
 )
 
 from pydantic import (
@@ -70,9 +71,11 @@ class ChatResponse(BaseModel):
 
     Attributes:
         messages: List of messages in the conversation.
+        affection_score: The current affection score for the session.
     """
 
     messages: List[Message] = Field(..., description="List of messages in the conversation")
+    affection_score: int = Field(default=0, description="Current affection score (-10 to 10)")
 
 
 class StreamResponse(BaseModel):
@@ -81,7 +84,9 @@ class StreamResponse(BaseModel):
     Attributes:
         content: The content of the current chunk.
         done: Whether the stream is complete.
+        affection_score: Sent with the final chunk.
     """
 
     content: str = Field(default="", description="The content of the current chunk")
     done: bool = Field(default=False, description="Whether the stream is complete")
+    affection_score: Optional[int] = Field(default=None, description="Affection score, sent with final chunk")

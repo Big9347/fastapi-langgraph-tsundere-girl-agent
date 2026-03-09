@@ -29,8 +29,8 @@ RUN uv venv && . .venv/bin/activate && uv pip install -e .
 # Copy the application
 COPY . .
 
-# Make entrypoint script executable - do this before changing user
-RUN chmod +x /app/scripts/docker-entrypoint.sh
+# Fix Windows CRLF line endings and make entrypoint executable
+RUN sed -i 's/\r$//' /app/scripts/docker-entrypoint.sh && chmod +x /app/scripts/docker-entrypoint.sh
 
 # Create a non-root user
 RUN useradd -m appuser && chown -R appuser:appuser /app
