@@ -189,15 +189,25 @@ class LangGraphAgent:
         Returns:
             dict with score_modifier and optionally user_name.
         """
-        # Get the last user message
-        last_user_msg = None
-        for msg in reversed(state.messages):
+        # Find the last user message and its index
+        last_user_msg_idx = -1
+        prev_user_msg_idx = 0
+        
+        # Iterate backwards to find the last HumanMessage and the one before that
+        for i in range(len(state.messages) - 1, -1, -1):
+            msg = state.messages[i]
             if isinstance(msg, HumanMessage) and msg.content:
-                last_user_msg = msg.content
-                break
+                if last_user_msg_idx == -1:
+                    last_user_msg_idx = i
+                else:
+                    prev_user_msg_idx = i
+                    break
 
-        if not last_user_msg:
-            return {"score_modifier": 0}
+        if last_user_msg_idx == -1:
+            return {"affection_score": state.affection_score}
+
+        # Build conversation context ending at the last user message, starting from the previous user message
+        recent_messages = state.messages[prev_user_msg_idx : last_user_msg_idx + 1]
 
         analyzer_prompt = load_analyzer_prompt()
 
@@ -210,12 +220,10 @@ class LangGraphAgent:
             current_llm = self.llm_service.get_llm()
             structured_llm = current_llm.with_structured_output(AnalyzerResult)
 
-            result: AnalyzerResult = await structured_llm.ainvoke(
-                [
-                    SystemMessage(content=analyzer_prompt),
-                    HumanMessage(content=last_user_msg),
-                ]
-            )
+            # Build the message list for the LLM natively
+            messages_for_llm = [SystemMessage(content=analyzer_prompt)] + recent_messages
+
+            result: AnalyzerResult = await structured_llm.ainvoke(messages_for_llm)
 
             modifier = max(-1, min(1, result.modifier))  # Clamp to -1, 0, +1
 
