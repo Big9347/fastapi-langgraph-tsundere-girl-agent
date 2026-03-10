@@ -1,5 +1,6 @@
 """This file contains the session model for the application."""
 
+import uuid
 from typing import (
     TYPE_CHECKING,
     List,
@@ -29,6 +30,6 @@ class Session(BaseModel, table=True):
     """
 
     id: str = Field(primary_key=True)
-    user_id: int = Field(foreign_key="user.id")
+    user_id: uuid.UUID = Field(foreign_key="user.id")
     name: str = Field(default="")
     user: "User" = Relationship(back_populates="sessions")

@@ -1,6 +1,7 @@
 """This file contains the authentication schema for the application."""
 
 import re
+import uuid
 from datetime import datetime
 
 from pydantic import (
@@ -95,7 +96,7 @@ class UserResponse(BaseModel):
         token: Authentication token
     """
 
-    id: int = Field(..., description="User's ID")
+    id: uuid.UUID = Field(..., description="User's ID")
     email: str = Field(..., description="User's email address")
     token: Token = Field(..., description="Authentication token")
 

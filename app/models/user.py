@@ -1,5 +1,6 @@
 """This file contains the user model for the application."""
 
+import uuid
 from typing import (
     TYPE_CHECKING,
     List,
@@ -28,7 +29,7 @@ class User(BaseModel, table=True):
         sessions: Relationship to user's chat sessions
     """
 
-    id: int = Field(default=None, primary_key=True)
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     email: str = Field(unique=True, index=True)
     hashed_password: str
     sessions: List["Session"] = Relationship(back_populates="user")

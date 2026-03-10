@@ -1,5 +1,6 @@
 """This file contains the database service for the application."""
 
+import uuid
 from typing import (
     List,
     Optional,
@@ -87,7 +88,7 @@ class DatabaseService:
             logger.info("user_created", email=email)
             return user
 
-    async def get_user(self, user_id: int) -> Optional[User]:
+    async def get_user(self, user_id: uuid.UUID) -> Optional[User]:
         """Get a user by ID.
 
         Args:
@@ -133,7 +134,7 @@ class DatabaseService:
             logger.info("user_deleted", email=email)
             return True
 
-    async def create_session(self, session_id: str, user_id: int, name: str = "") -> ChatSession:
+    async def create_session(self, session_id: str, user_id: uuid.UUID, name: str = "") -> ChatSession:
         """Create a new chat session.
 
         Args:
@@ -184,7 +185,7 @@ class DatabaseService:
             chat_session = session.get(ChatSession, session_id)
             return chat_session
 
-    async def get_user_sessions(self, user_id: int) -> List[ChatSession]:
+    async def get_user_sessions(self, user_id: uuid.UUID) -> List[ChatSession]:
         """Get all sessions for a user.
 
         Args:

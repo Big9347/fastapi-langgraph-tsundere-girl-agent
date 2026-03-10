@@ -77,10 +77,10 @@ async def get_current_user(
             )
 
         # Verify user exists in database
-        user_id_int = int(user_id)
-        user = await db_service.get_user(user_id_int)
+        user_id_uuid = uuid.UUID(user_id)
+        user = await db_service.get_user(user_id_uuid)
         if user is None:
-            logger.error("user_not_found", user_id=user_id_int)
+            logger.error("user_not_found", user_id=str(user_id_uuid))
             raise HTTPException(
                 status_code=404,
                 detail="User not found",
@@ -88,7 +88,7 @@ async def get_current_user(
             )
 
         # Bind user_id to logging context for all subsequent logs in this request
-        bind_context(user_id=user_id_int)
+        bind_context(user_id=str(user_id_uuid))
 
         return user
     except ValueError as ve:
@@ -141,7 +141,7 @@ async def get_current_session(
             )
 
         # Bind user_id to logging context for all subsequent logs in this request
-        bind_context(user_id=session.user_id)
+        bind_context(user_id=str(session.user_id))
 
         return session
     except ValueError as ve:
@@ -259,14 +259,14 @@ async def create_session(user: User = Depends(get_current_user)):
         logger.info(
             "session_created",
             session_id=session_id,
-            user_id=user.id,
+            user_id=str(user.id),
             name=session.name,
             expires_at=token.expires_at.isoformat(),
         )
 
         return SessionResponse(session_id=session_id, name=session.name, token=token)
     except ValueError as ve:
-        logger.error("session_creation_validation_failed", error=str(ve), user_id=user.id, exc_info=True)
+        logger.error("session_creation_validation_failed", error=str(ve), user_id=str(user.id), exc_info=True)
         raise HTTPException(status_code=422, detail=str(ve))
 
 
@@ -329,7 +329,7 @@ async def delete_session(session_id: str, current_session: Session = Depends(get
         # Delete the session
         await db_service.delete_session(sanitized_session_id)
 
-        logger.info("session_deleted", session_id=session_id, user_id=current_session.user_id)
+        logger.info("session_deleted", session_id=session_id, user_id=str(current_session.user_id))
     except ValueError as ve:
         logger.error("session_deletion_validation_failed", error=str(ve), session_id=session_id, exc_info=True)
         raise HTTPException(status_code=422, detail=str(ve))
@@ -356,5 +356,5 @@ async def get_user_sessions(user: User = Depends(get_current_user)):
             for session in sessions
         ]
     except ValueError as ve:
-        logger.error("get_sessions_validation_failed", user_id=user.id, error=str(ve), exc_info=True)
+        logger.error("get_sessions_validation_failed", user_id=str(user.id), error=str(ve), exc_info=True)
         raise HTTPException(status_code=422, detail=str(ve))
