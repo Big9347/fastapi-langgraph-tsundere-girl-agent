@@ -39,7 +39,7 @@ from app.core.config import (
 #from app.core.langgraph.tools import tools
 from app.core.logging import logger
 from app.core.metrics import llm_inference_duration_seconds
-from app.core.prompts import load_system_prompt, load_analyzer_prompt
+from app.core.prompts import load_system_prompt, load_analyzer_prompt, load_custom_fact_extraction_prompt, load_custom_update_memory_prompt
 from app.schemas import (
     GraphState,
     Message,
@@ -95,7 +95,8 @@ class LangGraphAgent:
                         "config": {"model": settings.LONG_TERM_MEMORY_MODEL},
                     },
                     "embedder": {"provider": "openai", "config": {"model": settings.LONG_TERM_MEMORY_EMBEDDER_MODEL}},
-                    # "custom_fact_extraction_prompt": load_custom_fact_extraction_prompt(),
+                    "custom_fact_extraction_prompt": load_custom_fact_extraction_prompt(),
+                    "custom_update_memory_prompt": load_custom_update_memory_prompt(),
                 }
             )
         return self.memory
@@ -150,7 +151,7 @@ class LangGraphAgent:
         """
         try:
             memory = await self._long_term_memory()
-            results = await memory.search(user_id=str(user_id), query=query)
+            results = await memory.search(user_id=str(user_id), query=query, limit=1)
             print(results)
             return "\n".join([f"* {result['memory']}" for result in results["results"]])
         except Exception as e:
