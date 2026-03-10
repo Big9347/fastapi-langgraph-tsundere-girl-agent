@@ -425,9 +425,12 @@ class LangGraphAgent:
                 config=config,
             )
             # Run memory update in background without blocking the response
+            # Pass only the recent context (e.g. the preceding AI message and the current user message)
+            # This prevents re-processing the entire history and provides enough context for the user's message
+            recent_context = convert_to_openai_messages(messages[-2:])
             asyncio.create_task(
                 self._update_long_term_memory(
-                    user_id, convert_to_openai_messages(response["messages"]), config["metadata"]
+                    user_id, recent_context, config["metadata"]
                 )
             )
             return self.__process_messages(response["messages"]), response["affection_score"]
@@ -496,9 +499,12 @@ class LangGraphAgent:
             # After streaming completes, get final state and update memory in background
             state: StateSnapshot = await sync_to_async(self._graph.get_state)(config=config)
             if state.values and "messages" in state.values:
+                # Pass only the recent context (e.g. the preceding AI message and the current user message)
+                # This prevents re-processing the entire history and provides enough context for the user's message
+                recent_context = convert_to_openai_messages(messages[-2:])
                 asyncio.create_task(
                     self._update_long_term_memory(
-                        user_id, convert_to_openai_messages(state.values["messages"]), config["metadata"]
+                        user_id, recent_context, config["metadata"]
                     )
                 )
         except Exception as stream_error:

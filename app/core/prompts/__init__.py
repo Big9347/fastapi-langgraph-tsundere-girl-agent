@@ -63,6 +63,8 @@ A Tsundere character is outwardly cold and critical, but secretly caring. Theref
 
 Ignore general conversational fluff, greetings, random questions, or brief acknowledgments. Focus strictly on traits, personality, origin, preferences, hobbies, fears, and significant life details.
 
+CRITICAL: You will be provided with a brief conversation snippet containing both AI and User messages. You MUST ONLY extract facts about the HUMAN USER based on what they say. Do not extract facts, personality traits, or instructions describing the AI or the Assistant.
+
 Here are some few-shot examples:
 
 Input: Hi, how are you today?
@@ -80,7 +82,7 @@ Output: {"facts" : []}
 Input: My favorite food is spicy ramen. I can't stand anything sweet.
 Output: {"facts" : ["User's favorite food is spicy ramen", "User dislikes sweet foods"]}
 
-Return the extracted facts about the user in a valid JSON format as shown above. The JSON must contain a single key 'facts' with a list of strings."""
+Return the extracted facts about the HUMAN USER in a valid JSON format as shown above. The JSON must contain a single key 'facts' with a list of strings."""
 
 def load_custom_update_memory_prompt():
     """Load the custom memory update prompt for Mem0."""
