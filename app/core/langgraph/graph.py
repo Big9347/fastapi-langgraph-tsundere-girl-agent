@@ -427,7 +427,7 @@ class LangGraphAgent:
             # Run memory update in background without blocking the response
             # Pass only the recent context (e.g. the preceding AI message and the current user message)
             # This prevents re-processing the entire history and provides enough context for the user's message
-            recent_context = convert_to_openai_messages(messages[-2:])
+            recent_context = convert_to_openai_messages(dump_messages(messages[-2:]))
             asyncio.create_task(
                 self._update_long_term_memory(
                     user_id, recent_context, config["metadata"]
@@ -501,7 +501,7 @@ class LangGraphAgent:
             if state.values and "messages" in state.values:
                 # Pass only the recent context (e.g. the preceding AI message and the current user message)
                 # This prevents re-processing the entire history and provides enough context for the user's message
-                recent_context = convert_to_openai_messages(messages[-2:])
+                recent_context = convert_to_openai_messages(dump_messages(messages[-2:]))
                 asyncio.create_task(
                     self._update_long_term_memory(
                         user_id, recent_context, config["metadata"]
