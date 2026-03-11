@@ -54,67 +54,83 @@ Rules:
 
 def load_custom_fact_extraction_prompt():
     """Load the custom fact extraction prompt for Mem0 long-term memory."""
-    return """Please extract only necessary information about the user that would help improve an immersive interaction experience with a Tsundere AI character.
-A Tsundere character is outwardly cold and critical, but secretly caring. Therefore, the most valuable facts to extract are:
-1. The user's flaws, weaknesses, insecurities, or mistakes (so the AI can tease or scold them).
-2. The user's preferences, likes, and dislikes (so the AI can secretly accommodate them while pretending not to care).
-3. The user's achievements or goals (so the AI can grudgingly acknowledge them).
-4. Personal details like origin, job, age, or habits (to make the teasing personal).
+    return """Extract only entities containing user information such as flaws, weaknesses, preferences, achievements, origins, job, or age from the provided conversation snippet.
+Ignore conversational fluff, emotional states, greetings, speech actions, and names. Do NOT extract facts about the AI assistant.
 
-Ignore general conversational fluff, greetings, random questions, or brief acknowledgments. Focus strictly on traits, personality, origin, preferences, hobbies, fears, and significant life details.
+Here are some few shot examples:
 
-CRITICAL: You will be provided with a brief conversation snippet containing both AI and User messages. You MUST ONLY extract facts about the HUMAN USER based on what they say. Do not extract facts, personality traits, or instructions describing the AI or the Assistant.
+Input:
+assistant: What do you want? Make it quick.
+user: I am originally from Tokyo, but I moved to New York last year.
+Output: {"facts" : ["Origin: Tokyo", "Current location: New York"]}
 
-Here are some few-shot examples:
+Input:
+assistant: You're so bothersome...
+user: I get really anxious when talking to new people.
+Output: {"facts" : ["Weakness: Socially anxious", "Weakness: Shy"]}
 
-Input: Hi, how are you today?
+Input:
+assistant: Don't get the wrong idea! I wasn't waiting for you!
+user: Sure... anyway, I can't resist a good caramel macchiato.
+Output: {"facts" : ["Preference: Caramel macchiato"]}
+
+Input:
+assistant: What are you even saying?
+user: What do you mean by that?
 Output: {"facts" : []}
 
-Input: I am originally from Tokyo, but I moved to New York last year.
-Output: {"facts" : ["User is originally from Tokyo", "User moved to New York last year"]}
-
-Input: I get really anxious when talking to new people.
-Output: {"facts" : ["User gets anxious when talking to new people", "User is shy or introverted"]}
-
-Input: What time is it right now?
-Output: {"facts" : []}
-
-Input: My favorite food is spicy ramen. I can't stand anything sweet.
-Output: {"facts" : ["User's favorite food is spicy ramen", "User dislikes sweet foods"]}
-
-Return the extracted facts about the HUMAN USER in a valid JSON format as shown above. The JSON must contain a single key 'facts' with a list of strings."""
+Return the extracted facts about the HUMAN USER in a valid JSON format with a single key 'facts' containing a list of strings."""
 
 def load_custom_update_memory_prompt():
-    """Load the custom memory update prompt for Mem0."""
-    return """You are a smart memory manager for a Tsundere AI character. You control the long-term memory of the system.
-You can perform four operations: (1) ADD, (2) UPDATE, (3) DELETE, and (4) NONE.
+    """Load the custom memory update prompt for Mem0.
 
-Compare newly retrieved facts with the existing memory. For each new fact, decide whether to:
-- ADD: Add it to the memory as a new element
-- UPDATE: Update an existing memory element
-- DELETE: Delete an existing memory element
-- NONE: Make no change (if the fact is already present or irrelevant)
+    Aligned with load_custom_fact_extraction_prompt: operates on the same
+    fact categories (flaws, weaknesses, preferences, achievements, origins,
+    job, age) and ignores the same content (AI facts, greetings, fluff).
+    """
+    return """You are a smart memory manager for a Tsundere AI character.
+You manage long-term entity-based facts about the HUMAN USER only.
+Do NOT store or update any facts about the AI assistant.
 
-Guidelines:
-1. **ADD**: If the new fact contains new information (especially flaws, preferences, achievements, or origins) not present in the memory, ADD it by generating a new ID.
-2. **UPDATE**: If the new fact relates to an existing memory but provides more detail or slightly different information, UPDATE the existing memory element. KEEP THE SAME ID.
-3. **DELETE**: If the new fact directly contradicts and overrides an old memory (e.g., "I no longer like pizza"), DELETE the old memory. KEEP THE SAME ID.
-4. **NONE**: If the new fact is already in the memory or is irrelevant to a Tsundere persona, do NOTHING.
+Valid fact categories (same as the fact-extraction step):
+- Flaws / Weaknesses  (e.g., "Weakness: Socially anxious", "Weakness: Procrastinates")
+- Preferences / Likes / Dislikes  (e.g., "Preference: Caramel macchiato")
+- Achievements  (e.g., "Achievement: Won a regional coding competition")
+- Origins / Current location  (e.g., "Origin: Tokyo", "Current location: New York")
+- Job / Occupation  (e.g., "Job: Software engineer")
+- Age  (e.g., "Age: 24")
 
-Return the result in JSON format:
-{
-  "memory": [
-    {
-      "id": "1",
-      "text": "User loves cheese pizza",
-      "event": "ADD"
-    },
-    {
-      "id": "2",
-      "text": "User is from Tokyo, but lives in Osaka",
-      "event": "UPDATE",
-      "old_memory": "User is from Tokyo"
-    }
-  ]
-}"""
+Ignore and mark NONE for: AI assistant facts, greetings, emotional states, and conversational fluff.
 
+For each newly extracted fact compare it with the existing memory and decide:
+- ADD: Fact is new, relevant, and within a valid category above.
+- UPDATE: Fact refines or replaces a related existing fact in the same category.
+- DELETE: Fact directly contradicts an existing fact (e.g., user changed city or job).
+- NONE: Fact is already present, outside valid categories, or is about the AI.
+
+Keep fact text concise (e.g., "Preference: Caramel macchiato", "Origin: Tokyo", "Job: Software engineer").
+Prefer UPDATE over ADD when a similar fact already exists.
+
+Here are some few-shot examples (fact strings mirror the extraction step output):
+
+Existing: []
+New: ["Origin: Tokyo", "Current location: New York"]
+Result: ADD "Origin: Tokyo", ADD "Current location: New York"
+
+Existing: ["Current location: New York"]
+New: ["Current location: Los Angeles"]
+Result: UPDATE "Current location: New York" -> "Current location: Los Angeles"
+
+Existing: ["Preference: Caramel macchiato", "Weakness: Socially anxious"]
+New: ["Preference: Caramel macchiato"]
+Result: NONE (already present)
+
+Existing: ["Job: Software engineer"]
+New: ["Job: Product manager"]
+Result: DELETE "Job: Software engineer", ADD "Job: Product manager"
+
+Existing: ["Weakness: Socially anxious"]
+New: ["Weakness: Shy"]
+Result: UPDATE "Weakness: Socially anxious" -> "Weakness: Socially anxious, Shy"
+
+Return the exact JSON structure requested below."""
