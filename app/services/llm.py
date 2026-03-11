@@ -29,9 +29,6 @@ from app.core.config import (
     settings,
 )
 from app.core.logging import logger
-import logging
-
-tenacity_logger = logging.getLogger("llm_retry")
 
 
 class LLMRegistry:
@@ -229,7 +226,7 @@ class LLMService:
         stop=stop_after_attempt(settings.MAX_LLM_CALL_RETRIES),
         wait=wait_exponential(multiplier=1, min=2, max=10),
         retry=retry_if_exception_type((RateLimitError, APITimeoutError, APIError)),
-        before_sleep=before_sleep_log(tenacity_logger, logging.WARNING),
+        before_sleep=before_sleep_log(logger, "WARNING"),
         reraise=True,
     )
     async def _call_llm_with_retry(self, messages: List[BaseMessage]) -> BaseMessage:
