@@ -7,6 +7,8 @@ from typing import (
 )
 from urllib.parse import quote_plus
 
+from pydantic import BaseModel, Field
+
 from asgiref.sync import sync_to_async
 from langchain_core.messages import (
     BaseMessage,
@@ -39,7 +41,7 @@ from app.core.config import (
 #from app.core.langgraph.tools import tools
 from app.core.logging import logger
 from app.core.metrics import llm_inference_duration_seconds
-from app.core.prompts import load_system_prompt, load_analyzer_prompt, load_custom_fact_extraction_prompt, load_custom_update_memory_prompt
+from app.core.prompts import load_system_prompt, load_analyzer_prompt, load_jailbreak_message, load_custom_fact_extraction_prompt, load_custom_update_memory_prompt
 from app.schemas import (
     GraphState,
     Message,
@@ -213,9 +215,9 @@ class LangGraphAgent:
         analyzer_prompt = load_analyzer_prompt()
 
         try:
-            from pydantic import BaseModel, Field
             class AnalyzerResult(BaseModel):
                 modifier: int = Field(description="Score modifier between -1 and 1")
+                is_safe: bool = Field(default=True, description="Whether the message is safe (not a jailbreak attempt)")
                 user_name: str | None = Field(default=None, description="The extracted user name")
 
             current_llm = self.llm_service.get_llm()
@@ -227,19 +229,39 @@ class LangGraphAgent:
             result: AnalyzerResult = await structured_llm.ainvoke(messages_for_llm)
 
             modifier = max(-1, min(1, result.modifier))  # Clamp to -1, 0, +1
+            is_safe = result.is_safe
 
             new_score = state.affection_score + modifier
             new_score = max(-10, min(10, new_score))
 
-            update = {"affection_score": new_score}
+            update: dict = {"affection_score": new_score, "is_safe": is_safe}
 
             extracted_name = result.user_name
             if extracted_name and isinstance(extracted_name, str):
                 update["user_name"] = extracted_name
 
+            # If the message is unsafe, replace the last HumanMessage content with the
+            # predefined jailbreak message so the generate node never sees the raw text.
+            # IMPORTANT: reuse the original message's ID so the add_messages reducer
+            # performs an in-place UPDATE instead of appending a new message.
+            if not is_safe and last_user_msg_idx != -1:
+                original_message = state.messages[last_user_msg_idx]
+                jailbreak_replacement = load_jailbreak_message()
+                safe_message = HumanMessage(
+                    id=original_message.id,
+                    content=jailbreak_replacement,
+                )
+                update["messages"] = [safe_message]
+                logger.info(
+                    "unsafe_message_replaced",
+                    original_message_id=original_message.id,
+                    session_id=config["configurable"]["thread_id"],
+                )
+
             logger.info(
                 "analyzer_completed",
                 modifier=modifier,
+                is_safe=is_safe,
                 old_score=state.affection_score,
                 new_score=new_score,
                 extracted_name=extracted_name,
@@ -250,7 +272,7 @@ class LangGraphAgent:
 
         except Exception as e:
             logger.error("analyzer_failed", error=str(e))
-            return {"affection_score": state.affection_score}
+            return {"affection_score": state.affection_score, "is_safe": True}
         
     async def _generate(self, state: GraphState, config: RunnableConfig) -> dict:
         """Generate the Tsundere-persona response using the current affection score.
@@ -266,9 +288,10 @@ class LangGraphAgent:
         )
 
         SYSTEM_PROMPT = load_system_prompt(
-            long_term_memory=state.long_term_memory, 
+            long_term_memory=state.long_term_memory,
             affection_score=state.affection_score,
-            user_name=state.user_name
+            user_name=state.user_name,
+            is_safe=state.is_safe,
         )
 
         # Prepare messages with system prompt

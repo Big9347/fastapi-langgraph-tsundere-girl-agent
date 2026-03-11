@@ -20,3 +20,4 @@ class GraphState(BaseModel):
     long_term_memory: str = Field(default="", description="The long term memory of the conversation")
     affection_score: int = Field(default=0, description="Affection score from -10 to 10, controls persona tone")
     user_name: Optional[str] = Field(default=None, description="The name of the user")
+    is_safe: bool = Field(default=True, description="Whether the latest user message is safe (not a jailbreak attempt)")
