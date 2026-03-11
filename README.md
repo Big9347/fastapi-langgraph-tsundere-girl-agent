@@ -146,10 +146,12 @@ make docker-stop ENV=development
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `POST` | `/api/v1/auth/register` | Register a new user |
-| `POST` | `/api/v1/auth/login` | Login and receive JWT token |
-| `POST` | `/api/v1/auth/logout` | Logout current session |
-| `GET` | `/api/v1/auth/me` | Get current user info |
+| `POST` | `/api/v1/auth/register` | Register a new user, returns user info + token |
+| `POST` | `/api/v1/auth/login` | Login and receive a user-level JWT token |
+| `POST` | `/api/v1/auth/session` | Create a new chat session (requires user token) |
+| `PATCH` | `/api/v1/auth/session/{session_id}/name` | Rename a session |
+| `DELETE` | `/api/v1/auth/session/{session_id}` | Delete a session |
+| `GET` | `/api/v1/auth/sessions` | List all sessions for the current user |
 
 ### Chat
 
@@ -157,11 +159,10 @@ All chat endpoints require a valid JWT token in the `Authorization: Bearer <toke
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `POST` | `/api/v1/chat` | Send a message, receive full response |
-| `POST` | `/api/v1/chat/stream` | Send a message, receive SSE streaming response |
-| `GET` | `/api/v1/chat/history` | Get conversation history for current session |
-| `DELETE` | `/api/v1/chat/history` | Clear conversation history |
-| `GET` | `/api/v1/chat/affection` | Get current affection score |
+| `POST` | `/api/v1/chat` | Send a message, receive full JSON response (includes affection score) |
+| `POST` | `/api/v1/chat/stream` | Send a message, receive SSE streaming response (includes affection score on final event) |
+| `GET` | `/api/v1/messages` | Get all messages for the current session with affection score |
+| `DELETE` | `/api/v1/messages` | Clear chat history for the current session |
 
 ### System
 
