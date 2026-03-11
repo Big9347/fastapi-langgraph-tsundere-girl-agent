@@ -16,6 +16,7 @@ from openai import (
     OpenAIError,
     RateLimitError,
 )
+import logging
 from tenacity import (
     before_sleep_log,
     retry,
@@ -226,7 +227,7 @@ class LLMService:
         stop=stop_after_attempt(settings.MAX_LLM_CALL_RETRIES),
         wait=wait_exponential(multiplier=1, min=2, max=10),
         retry=retry_if_exception_type((RateLimitError, APITimeoutError, APIError)),
-        before_sleep=before_sleep_log(logger, "WARNING"),
+        before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
     async def _call_llm_with_retry(self, messages: List[BaseMessage]) -> BaseMessage:
